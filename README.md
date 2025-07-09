@@ -5,7 +5,3 @@ This project aims to develop a Machine Learning–based dynamic pricing model fo
 # Machine Learning Approach
 
 - **Supervised Learning** using historical ticket data
-- Initial model: **Linear Regression**
-- Exploring advanced models (e.g., Decision Trees, Random Forest, XGBoost)
-- Performance evaluation based on metrics like RMSE and R² Score
-
