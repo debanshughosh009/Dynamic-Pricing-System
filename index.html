@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Train Fare Predictor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Simple animation for the trip plan appearing */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <main class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-6 text-center">Train Fare Predictor</h1>
+
+        <!-- Search Form -->
+        <div class="max-w-4xl mx-auto p-4 border border-gray-200 rounded-lg bg-white">
+            <form id="search-form" class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <div>
+                    <label for="from-station" class="block text-sm font-medium text-gray-700 mb-1">From</label>
+                    <input type="text" id="from-station" value="New Delhi (NDLS)" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div>
+                    <label for="to-station" class="block text-sm font-medium text-gray-700 mb-1">To</label>
+                    <input type="text" id="to-station" value="Mumbai Central (BCT)" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div>
+                    <label for="class-code" class="block text-sm font-medium text-gray-700 mb-1">Class</label>
+                    <select id="class-code" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                        <option value="3A">AC 3 Tier (3A)</option>
+                        <option value="2A">AC 2 Tier (2A)</option>
+                        <option value="1A">AC First Class (1A)</option>
+                        <option value="SL">Sleeper (SL)</option>
+                        <option value="CC">AC Chair Car (CC)</option>
+                        <option value="2S">Second Seating (2S)</option>
+                    </select>
+                </div>
+                <div class="md:col-span-3">
+                     <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 transition-colors flex items-center justify-center">
+                        Find Trains
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results-section" class="max-w-4xl mx-auto mt-6 hidden">
+            <div class="flex justify-between items-center mb-4">
+                 <h2 class="text-2xl font-semibold">Available Trains</h2>
+                 <button id="plan-trip-btn" class="bg-purple-600 text-white font-bold py-2 px-4 rounded-md hover:bg-purple-700 transition-colors flex items-center justify-center hidden">
+                    ✨ Plan My Trip
+                </button>
+            </div>
+            <div id="results-container" class="space-y-3">
+                <!-- Train cards will be inserted here by JavaScript -->
+            </div>
+        </div>
+        
+        <!-- Gemini Trip Plan Section -->
+        <div id="trip-plan-section" class="max-w-4xl mx-auto mt-6 hidden">
+             <h2 class="text-2xl font-semibold mb-4">Your One-Day Trip Plan</h2>
+             <div id="trip-plan-container" class="p-4 border border-purple-200 rounded-lg bg-purple-50 prose">
+                <!-- Trip plan will be inserted here -->
+             </div>
+        </div>
+    </main>
+
+    <!-- Modal for Loading/Error Messages -->
+    <div id="modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-white p-6 rounded-lg shadow-xl text-center">
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- CONFIGURATION ---
+        const PREDICTION_API_URL = "https://dynamic-pricing-system-m83w.onrender.com";
+        const GEMINI_API_KEY = ""; // Leave blank, will be handled by the environment
+        const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+        // --- MOCK DATA ---
+        const mockTrainData = [
+            { trainName: "Mumbai Rajdhani", trainNumber: "12952", departs: "16:55", arrives: "08:35", duration: 940, distance: 1384, has_catering: true, is_dynamic: true },
+            { trainName: "August Kranti Rajdhani", trainNumber: "12954", departs: "17:15", arrives: "10:05", duration: 1010, distance: 1377, has_catering: true, is_dynamic: true },
+            { trainName: "Golden Temple Mail", trainNumber: "12904", departs: "04:00", arrives: "05:50", duration: 1550, distance: 1395, has_catering: false, is_dynamic: false }
+        ];
+
+        // --- DOM ELEMENTS ---
+        const searchForm = document.getElementById('search-form');
+        const resultsSection = document.getElementById('results-section');
+        const resultsContainer = document.getElementById('results-container');
+        const planTripBtn = document.getElementById('plan-trip-btn');
+        const tripPlanSection = document.getElementById('trip-plan-section');
+        const tripPlanContainer = document.getElementById('trip-plan-container');
+        const modal = document.getElementById('modal');
+        const modalContent = document.getElementById('modal-content');
+
+        // --- EVENT LISTENERS ---
+        searchForm.addEventListener('submit', handleSearch);
+        planTripBtn.addEventListener('click', generateTripPlan);
+
+        // --- FUNCTIONS ---
+
+        async function handleSearch(e) {
+            e.preventDefault();
+            showLoading('Finding trains and predicting fares...');
+            tripPlanSection.classList.add('hidden'); // Hide old trip plans on new search
+            const classCode = document.getElementById('class-code').value;
+
+            try {
+                const predictionPromises = mockTrainData.map(train => {
+                    const payload = {
+                        class_code: classCode, distance: train.distance, duration: train.duration,
+                        has_catering: train.has_catering, is_dynamic: train.is_dynamic,
+                    };
+                    return fetch(PREDICTION_API_URL, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }).then(response => {
+                        if (!response.ok) throw new Error(`Prediction API returned status ${response.status}`);
+                        return response.json();
+                    });
+                });
+
+                const predictions = await Promise.all(predictionPromises);
+                const trainsWithFares = mockTrainData.map((train, index) => ({ ...train, ...predictions[index] }));
+                
+                displayResults(trainsWithFares, classCode);
+                hideModal();
+
+            } catch (error) {
+                console.error("Error fetching predictions:", error);
+                showError(`Could not fetch fares. Please ensure the prediction API is running locally on port 8000.`);
+            }
+        }
+
+        function displayResults(trains, classCode) {
+            resultsContainer.innerHTML = '';
+            trains.forEach(train => {
+                const totalFare = train.predicted_base_fare + getReservationCharge(classCode) + 45;
+                const card = `
+                    <div class="border border-gray-200 rounded-lg p-4 flex justify-between items-center bg-white">
+                        <div>
+                            <p class="font-bold text-lg">${train.trainName} (${train.trainNumber})</p>
+                            <p class="text-sm text-gray-600">
+                                ${train.departs} (NDLS) &rarr; ${train.arrives} (BCT)
+                                <span class="ml-4 text-gray-500">${Math.floor(train.duration / 60)}h ${train.duration % 60}m</span>
+                            </p>
+                        </div>
+                        <div class="text-right">
+                            <p class="font-bold text-xl text-green-600">₹${totalFare.toFixed(2)}</p>
+                            <p class="text-xs text-gray-500">for ${classCode} class</p>
+                        </div>
+                    </div>`;
+                resultsContainer.innerHTML += card;
+            });
+            resultsSection.classList.remove('hidden');
+            planTripBtn.classList.remove('hidden'); // Show the "Plan My Trip" button
+        }
+
+        async function generateTripPlan() {
+            const destination = document.getElementById('to-station').value.split('(')[0].trim();
+            showLoading(`✨ Generating a trip plan for ${destination}...`);
+            
+            const prompt = `Create a fun, one-day travel itinerary for a tourist visiting ${destination}. Keep it brief and suggest 3-4 places with a short, exciting description for each. Format the output as simple HTML using h3 for titles and p for descriptions.`;
+            
+            const payload = {
+                contents: [{ role: "user", parts: [{ text: prompt }] }]
+            };
+
+            try {
+                const response = await fetch(GEMINI_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Gemini API returned status ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    tripPlanContainer.innerHTML = text; // Insert the HTML content from Gemini
+                    tripPlanSection.classList.remove('hidden');
+                    tripPlanSection.classList.add('fade-in');
+                } else {
+                    throw new Error("No content received from Gemini API.");
+                }
+                hideModal();
+
+            } catch (error) {
+                console.error("Error fetching trip plan:", error);
+                showError("Sorry, I couldn't generate a trip plan right now. Please try again later.");
+            }
+        }
+
+        function getReservationCharge(classCode) {
+            const charges = { '1A': 60, '2A': 50, '3A': 40, 'SL': 20, 'CC': 40, '2S': 15 };
+            return charges[classCode] || 20;
+        }
+
+        function showLoading(message) {
+            modalContent.innerHTML = `<i class="fas fa-spinner fa-spin text-3xl text-blue-500"></i><p class="mt-3">${message}</p>`;
+            modal.classList.remove('hidden');
+        }
+
+        function showError(message) {
+            modalContent.innerHTML = `<i class="fas fa-exclamation-triangle text-3xl text-red-500"></i><p class="mt-3">${message}</p><button onclick="hideModal()" class="mt-4 bg-red-500 text-white px-4 py-1 rounded">Close</button>`;
+            modal.classList.remove('hidden');
+        }
+
+        function hideModal() {
+            modal.classList.add('hidden');
+        }
+
+    </script>
+</body>
+</html>
